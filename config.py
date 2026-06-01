@@ -23,7 +23,6 @@ COLAB_PROCESSING_DIR = (
 
 LAYOUTS: tuple[str, ...] = ("layout1", "layout2", "layout3", "layout4")
 
-
 def _is_colab() -> bool:
     try:
         import google.colab  # noqa: F401
@@ -35,13 +34,18 @@ def _is_colab() -> bool:
 
 IS_COLAB = _is_colab()
 
-if IS_COLAB:
-    PROJECT_ROOT = Path(COLAB_SCRIPTS_DIR)
+_SCRIPT_ROOT = Path(__file__).resolve().parent
+_DRIVE_ROOT = Path(COLAB_SCRIPTS_DIR)
+
+if IS_COLAB and _DRIVE_ROOT.is_dir() and (_DRIVE_ROOT / "config.py").is_file():
+    # Scripts live on Google Drive (production Colab setup).
+    PROJECT_ROOT = _DRIVE_ROOT
     INPUT_DIR = Path(COLAB_INPUT_DIR)
     OUTPUT_DIR = Path(COLAB_OUTPUT_DIR)
     PROCESSING_DIR = Path(COLAB_PROCESSING_DIR)
 else:
-    PROJECT_ROOT = Path(__file__).resolve().parent
+    # Local machine, or Colab clone e.g. /content/Aptiv_Road from GitHub.
+    PROJECT_ROOT = _SCRIPT_ROOT
     INPUT_DIR = PROJECT_ROOT / "input"
     OUTPUT_DIR = PROJECT_ROOT / "output"
     PROCESSING_DIR = PROJECT_ROOT / "processing"
@@ -65,3 +69,4 @@ def matrix_output_path(converted_path: Path) -> Path:
     except ValueError:
         pass
     return OUTPUT_DIR / stem
+
