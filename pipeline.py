@@ -9,23 +9,62 @@ Local:
     python pipeline.py --layout layout1
     python pipeline.py --export-only
 
-Colab (after copying this repo to COLAB_SCRIPTS_DIR on Drive):
+Colab (recommended — do NOT use exec(open(...).read())):
+    import sys
+    sys.path.insert(0, "/content/Aptiv_Road")
     from pipeline import setup_environment, run_pipeline
     setup_environment()
     run_pipeline()
+
+Or run as a script:
+    !python /content/Aptiv_Road/pipeline.py
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+
+def _bootstrap_project_path() -> Path | None:
+    """Find project root (folder with config.py) and add it to sys.path."""
+    candidates: list[Path] = []
+    env_root = os.environ.get("APTIV_ROAD_ROOT")
+    if env_root:
+        candidates.append(Path(env_root))
+    try:
+        candidates.append(Path(__file__).resolve().parent)
+    except NameError:
+        pass
+    candidates.extend(
+        [
+            Path("/content/Aptiv_Road"),
+            Path("/content/drive/MyDrive/Aptiv_Road"),
+            Path.cwd(),
+        ]
+    )
+    seen: set[str] = set()
+    for root in candidates:
+        key = str(root.resolve()) if root.exists() else str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        if (root / "config.py").is_file():
+            root_s = str(root.resolve())
+            if root_s not in sys.path:
+                sys.path.insert(0, root_s)
+            return root.resolve()
+    return None
+
+
+_bootstrap_project_path()
+
 import config
 
-# Ensure project modules resolve when launched from another cwd (e.g. Colab).
 if str(config.PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(config.PROJECT_ROOT))
 
