@@ -291,7 +291,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="pip install requirements.txt, then exit.",
     )
-    return parser.parse_args(argv)
+    if argv is None:
+        # Colab/Jupyter passes `-f kernel-*.json`; ignore unknown args.
+        args, _ = parser.parse_known_args()
+    else:
+        args = parser.parse_args(argv)
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
