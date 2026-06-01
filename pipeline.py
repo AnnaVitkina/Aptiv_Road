@@ -2,28 +2,28 @@
 """
 End-to-end Aptiv Road pipeline: convert ratebooks → matrix Excel.
 
-Runs non-interactively (batch). Suitable for local CLI and Google Colab.
+Two modes:
+  - **Interactive** (like convert.py): pick layout, file, tabs — then export matrix.
+  - **Batch**: process all files in input/ automatically.
 
 Local:
-    python pipeline.py
+    python pipeline.py -i              # interactive (prompts)
+    python pipeline.py                 # batch all files
     python pipeline.py --layout layout1
-    python pipeline.py --export-only
 
-Colab (recommended — do NOT use exec(open(...).read())):
+Colab (recommended):
     import sys
     sys.path.insert(0, "/content/Aptiv_Road")
-    from pipeline import setup_environment, run_pipeline
+    from pipeline import setup_environment, run_interactive
     setup_environment()
-    run_pipeline()
-
-Or run as a script:
-    !python /content/Aptiv_Road/pipeline.py
+    run_interactive()
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -68,9 +68,17 @@ import config
 if str(config.PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(config.PROJECT_ROOT))
 
-from common import output_path, save_dataframe
+from common import get_sheet_names, output_path, save_dataframe
 from converters import CONVERTERS
 from export_matrix import export_converted_file_to_matrix
+
+
+def _prompt(message: str) -> str:
+    try:
+        return input(message).strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\nCancelled.")
+        raise SystemExit(0) from None
 
 
 @dataclass
@@ -134,11 +142,15 @@ def convert_one(
     source: Path,
     *,
     sheets: list[str] | None = None,
+    sheet_configs: dict | None = None,
 ) -> Path | None:
     """Convert one workbook to long-format *_converted.xlsx under processing/."""
     converter = CONVERTERS[layout]
+    kwargs: dict = {}
+    if layout == "layout1" and sheet_configs:
+        kwargs["sheet_configs"] = sheet_configs
     try:
-        df = converter(source, sheets=sheets)
+        df = converter(source, sheets=sheets, **kwargs)
     except ValueError as exc:
         print(f"  ERROR converting {source.name}: {exc}")
         return None
@@ -249,6 +261,171 @@ def run_pipeline(
     return result
 
 
+def _parse_tab_selection(raw: str, sheet_names: list[str]) -> list[str] | None:
+    text = raw.strip().lower()
+    if not text or text in ("0", "a", "auto", "all"):
+        return None
+    if re.fullmatch(r"[\d,\s]+", text):
+        indices: list[int] = []
+        for part in re.split(r"[,]+", text):
+            part = part.strip()
+            if not part:
+                continue
+            if not part.isdigit():
+                raise ValueError(f"Invalid tab number: {part}")
+            indices.append(int(part))
+        resolved: list[str] = []
+        for idx in indices:
+            if idx < 1 or idx > len(sheet_names):
+                raise ValueError(f"Tab number {idx} out of range (1–{len(sheet_names)})")
+            name = sheet_names[idx - 1]
+            if name not in resolved:
+                resolved.append(name)
+        return resolved
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    by_lower = {n.strip().lower(): n for n in sheet_names}
+    resolved = []
+    for part in parts:
+        key = part.strip().lower()
+        if key in by_lower:
+            resolved.append(by_lower[key])
+            continue
+        matches = [n for n in sheet_names if key in n.strip().lower()]
+        if len(matches) == 1:
+            resolved.append(matches[0])
+        elif len(matches) > 1:
+            raise ValueError(f"Ambiguous tab '{part}'. Matches: {', '.join(matches)}")
+        else:
+            raise ValueError(f"Unknown tab: {part}")
+    return resolved
+
+
+def _choose_layout() -> str | None:
+    print("\nAvailable layout folders:")
+    for i, name in enumerate(config.LAYOUTS, 1):
+        folder = config.INPUT_DIR / name
+        count = len(_list_excel_files(name)) if folder.is_dir() else 0
+        print(f"  {i}. {name} ({count} files)")
+    print("  0. Exit")
+    while True:
+        choice = _prompt("\nSelect layout number: ")
+        if choice == "0":
+            return None
+        if choice.isdigit() and 1 <= int(choice) <= len(config.LAYOUTS):
+            return config.LAYOUTS[int(choice) - 1]
+        print("Invalid choice. Enter a number from the list.")
+
+
+def _choose_files(files: list[Path]) -> list[Path]:
+    print(f"\nFiles in input/{files[0].parent.name if files else ''}:")
+    for i, path in enumerate(files, 1):
+        print(f"  {i}. {path.name}")
+    print(f"  {len(files) + 1}. ALL files in this layout (auto price tabs only)")
+    print("  0. Back / exit")
+    while True:
+        choice = _prompt("\nSelect file number: ")
+        if choice == "0":
+            return []
+        if choice.isdigit():
+            n = int(choice)
+            if n == len(files) + 1:
+                return files
+            if 1 <= n <= len(files):
+                return [files[n - 1]]
+        print("Invalid choice.")
+
+
+def _choose_sheets(path: Path) -> list[str] | None:
+    try:
+        sheet_names = get_sheet_names(path)
+    except Exception as exc:
+        print(f"  ERROR reading workbook: {exc}")
+        return None
+    if not sheet_names:
+        print("  No sheets found in workbook.")
+        return []
+    print(f"\nTabs in {path.name}:")
+    for i, name in enumerate(sheet_names, 1):
+        print(f"  {i}. {name}")
+    print("  0 / auto — auto-detect price tabs only")
+    print("\nEnter tab number(s) or name(s), comma-separated (e.g. 3,4 or FTL,LTL):")
+    while True:
+        raw = _prompt("Tabs to convert: ")
+        try:
+            return _parse_tab_selection(raw, sheet_names)
+        except ValueError as exc:
+            print(f"  {exc}")
+            retry = _prompt("Try again? [Y/n]: ").lower()
+            if retry in ("n", "no"):
+                return None
+
+
+def run_interactive() -> PipelineResult:
+    """
+    Interactive pipeline: choose layout → file → tabs → convert → export matrix.
+    Same prompts as convert.py, plus optional matrix export step.
+    """
+    result = PipelineResult()
+    print("=" * 60)
+    print("  Aptiv Road — interactive pipeline")
+    print("=" * 60)
+    print(f"  Input:      {config.INPUT_DIR}")
+    print(f"  Processing: {config.PROCESSING_DIR}")
+    print(f"  Output:     {config.OUTPUT_DIR}")
+
+    while True:
+        layout = _choose_layout()
+        if layout is None:
+            break
+
+        files = _list_excel_files(layout)
+        if not files:
+            print(f"No Excel files found in input/{layout}/")
+            continue
+
+        selected = _choose_files(files)
+        if not selected:
+            continue
+
+        for path in selected:
+            sheets: list[str] | None = None
+            sheet_configs = None
+            if len(selected) == 1:
+                sheets = _choose_sheets(path)
+                if sheets == []:
+                    continue
+                if layout == "layout1":
+                    from converters.layout1 import gather_column_overrides
+
+                    sheet_configs = gather_column_overrides(
+                        path, sheets, input_fn=_prompt
+                    )
+
+            dest = convert_one(
+                layout, path, sheets=sheets, sheet_configs=sheet_configs
+            )
+            if dest is None:
+                result.convert_skipped.append(str(path))
+                continue
+            result.converted.append(dest)
+
+            export_now = _prompt("\nExport matrix Excel for this file? [Y/n]: ").lower()
+            if export_now not in ("n", "no"):
+                out = export_one(dest)
+                if out is None:
+                    result.export_errors.append(str(dest))
+                else:
+                    result.matrices.append(out)
+
+        print(f"\nDone this round: {len(result.converted)} converted, {len(result.matrices)} matrices.")
+        again = _prompt("\nProcess another file? [y/N]: ").lower()
+        if again not in ("y", "yes"):
+            break
+
+    print("\nGoodbye.")
+    return result
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Aptiv Road: convert ratebooks and export matrix Excel."
@@ -291,12 +468,40 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="pip install requirements.txt, then exit.",
     )
+    parser.add_argument(
+        "-i",
+        "--interactive",
+        action="store_true",
+        help="Prompt for layout, file, and tabs (like convert.py).",
+    )
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Process all input files without prompts (Colab default without -i).",
+    )
     if argv is None:
         # Colab/Jupyter passes `-f kernel-*.json`; ignore unknown args.
         args, _ = parser.parse_known_args()
     else:
         args = parser.parse_args(argv)
     return args
+
+
+def _in_notebook() -> bool:
+    try:
+        get_ipython()  # type: ignore[name-defined]
+        return True
+    except NameError:
+        return False
+
+
+def _use_interactive_mode(args: argparse.Namespace, argv: list[str] | None) -> bool:
+    if args.interactive:
+        return True
+    if args.batch or args.layouts or args.files or args.export_only or args.convert_only:
+        return False
+    # Colab notebook / script with no filters → ask which file to convert.
+    return config.IS_COLAB and argv is None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -307,7 +512,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.setup or config.IS_COLAB:
-        setup_environment()
+        drive_mounted = Path("/content/drive/MyDrive").exists() or Path(
+            "/content/drive/Shareddrives"
+        ).exists()
+        setup_environment(mount_drive=not drive_mounted)
+
+    if _use_interactive_mode(args, argv):
+        run_interactive()
+        return 0
 
     sheets: list[str] | None = None
     if args.sheets:
@@ -330,4 +542,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    exit_code = main()
+    if not _in_notebook():
+        raise SystemExit(exit_code)
