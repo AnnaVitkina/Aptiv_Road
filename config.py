@@ -6,20 +6,19 @@ from pathlib import Path
 
 # --- Google Colab (Drive) paths ---
 COLAB_SCRIPTS_DIR = (
-    "/content/drive/Shareddrives/FA Ops Europe: Rate Maintenance Team "
-    "/Documents/AI Adoption RMT/RMT/Aptiv Sea"
+    "/content/Aptiv_Road"
 )
 COLAB_INPUT_DIR = (
     "/content/drive/Shareddrives/FA Ops Europe: Rate Maintenance Team "
-    "/Documents/AI Adoption RMT/RMT/input json"
+    "/Documents/AI Adoption RMT/RMT_APTIV_VERSIGENT/RMT_Road/input"
 )
 COLAB_OUTPUT_DIR = (
     "/content/drive/Shareddrives/FA Ops Europe: Rate Maintenance Team "
-    "/Documents/AI Adoption RMT/RMT/output"
+    "/Documents/AI Adoption RMT/RMT_APTIV_VERSIGENT/RMT_Road/output"
 )
 COLAB_PROCESSING_DIR = (
     "/content/drive/Shareddrives/FA Ops Europe: Rate Maintenance Team "
-    "/Documents/AI Adoption RMT/RMT/processing"
+    "/Documents/AI Adoption RMT/RMT_APTIV_VERSIGENT/RMT_Road/processing"
 )
 
 LAYOUTS: tuple[str, ...] = ("layout1", "layout2", "layout3", "layout4")
