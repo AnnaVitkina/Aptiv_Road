@@ -4,24 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# --- Google Colab (Drive) paths ---
-COLAB_SCRIPTS_DIR = (
-    "/content/Aptiv_Road"
-)
-COLAB_INPUT_DIR = (
+# --- Google Colab (Drive) paths — data folders on Shared Drive ---
+COLAB_DRIVE_BASE = (
     "/content/drive/Shareddrives/FA Ops Europe: Rate Maintenance Team "
-    "/Documents/AI Adoption RMT/RMT_APTIV_VERSIGENT/RMT_Road/input"
+    "/Documents/AI Adoption RMT/RMT_APTIV_VERSIGENT/RMT_Road"
 )
-COLAB_OUTPUT_DIR = (
-    "/content/drive/Shareddrives/FA Ops Europe: Rate Maintenance Team "
-    "/Documents/AI Adoption RMT/RMT_APTIV_VERSIGENT/RMT_Road/output"
-)
-COLAB_PROCESSING_DIR = (
-    "/content/drive/Shareddrives/FA Ops Europe: Rate Maintenance Team "
-    "/Documents/AI Adoption RMT/RMT_APTIV_VERSIGENT/RMT_Road/processing"
-)
+COLAB_INPUT_DIR = f"{COLAB_DRIVE_BASE}/input"
+COLAB_OUTPUT_DIR = f"{COLAB_DRIVE_BASE}/output"
+COLAB_PROCESSING_DIR = f"{COLAB_DRIVE_BASE}/processing"
 
 LAYOUTS: tuple[str, ...] = ("layout1", "layout2", "layout3", "layout4")
+
 
 def _is_colab() -> bool:
     try:
@@ -35,16 +28,15 @@ def _is_colab() -> bool:
 IS_COLAB = _is_colab()
 
 _SCRIPT_ROOT = Path(__file__).resolve().parent
-_DRIVE_ROOT = Path(COLAB_SCRIPTS_DIR)
+_DRIVE_INPUT = Path(COLAB_INPUT_DIR)
 
-if IS_COLAB and _DRIVE_ROOT.is_dir() and (_DRIVE_ROOT / "config.py").is_file():
-    # Scripts live on Google Drive (production Colab setup).
-    PROJECT_ROOT = _DRIVE_ROOT
-    INPUT_DIR = Path(COLAB_INPUT_DIR)
+if IS_COLAB and _DRIVE_INPUT.is_dir():
+    # Colab: code from GitHub clone; input/output/processing on Google Drive.
+    PROJECT_ROOT = _SCRIPT_ROOT
+    INPUT_DIR = _DRIVE_INPUT
     OUTPUT_DIR = Path(COLAB_OUTPUT_DIR)
     PROCESSING_DIR = Path(COLAB_PROCESSING_DIR)
 else:
-    # Local machine, or Colab clone e.g. /content/Aptiv_Road from GitHub.
     PROJECT_ROOT = _SCRIPT_ROOT
     INPUT_DIR = PROJECT_ROOT / "input"
     OUTPUT_DIR = PROJECT_ROOT / "output"
@@ -69,4 +61,3 @@ def matrix_output_path(converted_path: Path) -> Path:
     except ValueError:
         pass
     return OUTPUT_DIR / stem
-
